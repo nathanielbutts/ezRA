@@ -1,4 +1,4 @@
-programName = 'ezCol231025a.py'
+programName = 'ezCol231129a.py'
 programRevision = programName
 
 # ezRA - Easy Radio Astronomy ezCol Data COLlector program,
@@ -29,6 +29,7 @@ programRevision = programName
 # 221202, works on Win7Pro 'Python 3.8.10'
 # 221130, works on Ubuntu22 'Python 3.10.6'
 
+# ezCol231129a.py, added Pi GPIO pin option for -ezColUsbRelay 15
 # ezCol231025a.py, added ezColAntBtwnRef to ezColArgumentsFile()
 # ezCol230406a.py, -eX
 # ezCol230316a.py, help screen edits, -eX
@@ -124,8 +125,6 @@ import time
 #import queue
 # delayed other imports until after possible help screen
 
-
-
 def printHello():
 
     global programRevision          # string
@@ -201,12 +200,14 @@ def printUsage():
     #print('              -ezColUsbRelay   3            (1 SPST non-HID relay, driving feedRef ON or OFF)')
     print('              -ezColUsbRelay    0           (No relays driving a feed Dicke reference)')
     print('              -ezColUsbRelay   11           (1 SPST HID relay,     driving feedRef ON or OFF)')
-    print('              -ezColUsbRelay   15           (1 SPST non-HID relay, driving feedRef ON or OFF, no Linux)')
+    print('              -ezColUsbRelay   15           (Use Pi GPIO, driving feedRef ON or OFF, no Linux)')
     print('              -ezColUsbRelay   21           (2 SPST HID relays, #1 driving feedRef ON or OFF)')
     print('              -ezColUsbRelay   22           (2 SPST HID relays, #2 driving feedRef ON or OFF)')
     print('              -ezColUsbRelay   29           (2 SPST HID relays, driving a latching feedRef',
         'relay with pulses)')
     print()
+    print('              -ezColRefGPIOPin #            (GPIO Pin to trigger usb relay)')
+    print('              -ezColRefPeriod  #            (number of seconds to activate usb relay, suggest 0.5 seconds)' )
     #print('              -ezColSlowness   0.9          (Define "Slow" data collect, to allow faster',
     #    'Dashboard interaction)')
     print('              -ezColIntegQty   31000        (Number of readings to be integrated into',
@@ -265,6 +266,8 @@ def ezColArgumentsFile(ezDefaultsFileNameInput):
     global ezColDispGrid                    # integer
 
     global ezColUsbRelay                    # integer
+    global ezColRefGPIOPin                  # integer
+    global ezColRefPeriod                   # integer
 
     #global ezColSlowness                    # float
     global ezColIntegQty                    # integer
@@ -337,6 +340,9 @@ def ezColArgumentsFile(ezDefaultsFileNameInput):
             elif thisLine0Lower == '-ezColUsbRelay'.lower():
                 ezColUsbRelay = int(thisLineSplit[1])
 
+            elif thisLine0Lower == '-ezColRefGPIOPin'.lower():
+                ezColRefGPIOPin = int(thisLineSplit[1])
+
             elif thisLine0Lower == '-ezColIntegQty'.lower():
                 ezColIntegQty = int(thisLineSplit[1])
 
@@ -361,6 +367,9 @@ def ezColArgumentsFile(ezDefaultsFileNameInput):
 
             elif thisLine0Lower == '-ezColElevation'.lower():
                 ezColElevation = float(thisLineSplit[1])
+
+            elif thisLine0Lower == '-ezColRefPeriod'.lower():
+                ezColRefPeriod = float(thisLineSplit[1])
 
             #elif thisLine0Lower == '-ezColSlowness'.lower():
             #    ezColSlowness = float(thisLineSplit[1])
@@ -425,6 +434,8 @@ def ezColArgumentsCommandLine():
     global cmdDirectoryS                    # string            creation
 
     global ezColUsbRelay                    # integer
+    global ezColRefGPIOPin                  # integer
+    global ezColRefPeriod                   # integer
 
     #global ezColSlowness                    # float
     global ezColIntegQty                    # integer
@@ -521,6 +532,10 @@ def ezColArgumentsCommandLine():
                 cmdLineSplitIndex += 1      # point to first argument value
                 ezColUsbRelay = int(cmdLineSplit[cmdLineSplitIndex])
 
+            elif cmdLineArgLower == '-ezColRefGPIOPin'.lower():
+                cmdLineSplitIndex += 1      # point to first argument value
+                ezColRefGPIOPin = int(cmdLineSplit[cmdLineSplitIndex])
+
             elif cmdLineArgLower == '-ezColIntegQty'.lower():
                 cmdLineSplitIndex += 1      # point to first argument value
                 ezColIntegQty = int(cmdLineSplit[cmdLineSplitIndex])
@@ -549,6 +564,10 @@ def ezColArgumentsCommandLine():
             elif cmdLineArgLower == '-ezColElevation'.lower():
                 cmdLineSplitIndex += 1      # point to first argument value
                 ezColElevation = float(cmdLineSplit[cmdLineSplitIndex])
+            
+            elif cmdLineArgLower == '-ezColRefPeriod'.lower():
+                cmdLineSplitIndex += 1      # point to first argument value
+                ezColRefPeriod = float(cmdLineSplit[cmdLineSplitIndex])
 
             #elif cmdLineArgLower == '-ezColSlowness'.lower():
             #    cmdLineSplitIndex += 1      # point to first argument value
@@ -621,6 +640,8 @@ def ezColArguments():
     global ezColDispGrid                    # integer
 
     global ezColUsbRelay                    # integer
+    global ezColRefGPIOPin                  # integer
+    global ezColRefPeriod                   # integer
 
     #global ezColSlowness                    # float         creation
     global ezColIntegQty                    # integer       creation
@@ -672,6 +693,7 @@ def ezColArguments():
         ezColDispGrid  = 0
 
         ezColUsbRelay = 0           # no relays driving a feedRef
+        ezColRefPeriod = 0.5        # if using feedref, drive for 0.5 seconds
 
         #ezColSlowness = 0.9         # data collecting pause to allow dashboard interaction
         ezColIntegQty = 31000       # number of samples to be integrated into one recorded sample
@@ -753,6 +775,8 @@ def ezColArguments():
     print('   ezColDispGrid  =', ezColDispGrid)
     print()
     print('   ezColUsbRelay =', ezColUsbRelay)
+    print('   ezColRefGPIOPin =', ezColRefGPIOPin)
+    print('   ezColRefPeriod =', ezColRefPeriod)
     #print('   ezColSlowness =', ezColSlowness)
     print('   ezColIntegQty =', ezColIntegQty)
     print('   ezColTextFontSize =', ezColTextFontSize)
@@ -1665,12 +1689,14 @@ def sdrTask(bandWidthHz, ezColGain, freqBinQty, centerFreqAntHz, centerFreqRefHz
                 os.system(relayOff0)
                 sleep(0.5) # Sleep for 0.5 seconds
             elif ezColUsbRelay == 15:
-                # ezColUsbRelay = 15: 1 SPST non-HID relay with serialSend.exe
-                # for USB Relay that talks serial
-                relayOff0 = '#'             # linux: not yet implemented
-                relayOn0  = '#'             # linux: not yet implemented
+                # ezColUsbRelay = 15: use specified GPIO Pin to trigger relay
+                relayOff0 = 'sudo raspi-gpio set ' +  ezColRefGPIOPin + ' op dh' # activate pin ouput
+                relayOn0  = 'sudo raspi-gpio set ' +  ezColRefGPIOPin + ' op dl' # deactivate pin
                 # initialize relays
-                #os.system(relayOff0)
+                os.system(relayOff0)
+                sleep(0.5) # activate pin for 0.5 seconds
+                os.syste(relayOn0)
+                sleep(0.5) # Sleep 0.5 seconds after deactivate to prevent issues
             elif ezColUsbRelay == 21:
                 # ezColUsbRelay = 21: 2 SPST HID relays, #1 driving feedRef ON or OFF
                 # for USB Relay that talks HID
